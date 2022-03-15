@@ -30,6 +30,14 @@ public class BleGattService implements Parcelable, Comparable {
         }
     }
 
+    public BleGattService(UUID uuid, List<BluetoothGattCharacteristic> characters) {
+        this.uuid = new ParcelUuid(uuid);
+        Iterator<BluetoothGattCharacteristic> itor = characters.iterator();
+        while (itor.hasNext()) {
+            BluetoothGattCharacteristic characteristic = itor.next();
+            getCharacters().add(new BleGattCharacter(characteristic));
+        }
+    }
 
     protected BleGattService(Parcel in) {
         uuid = in.readParcelable(ParcelUuid.class.getClassLoader());

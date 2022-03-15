@@ -39,6 +39,25 @@ public class BleGattProfile implements Parcelable {
         addServices(serviceList);
     }
 
+    public BleGattProfile(Map< UUID, List<BluetoothGattCharacteristic >> map, boolean dummy) {
+        Iterator itor = map.entrySet().iterator();
+
+        List<BleGattService> serviceList = new ArrayList<BleGattService>();
+
+        while (itor.hasNext()) {
+            Map.Entry entry = (Map.Entry) itor.next();
+            UUID serviceUUID = (UUID) entry.getKey();
+            List<BluetoothGattCharacteristic > characters = (List<BluetoothGattCharacteristic >) entry.getValue();
+
+            BleGattService service = new BleGattService(serviceUUID, characters);
+            if (!serviceList.contains(service)) {
+                serviceList.add(service);
+            }
+        }
+
+        addServices(serviceList);
+    }
+
     public BleGattProfile(Parcel in) {
         in.readTypedList(getServices(), BleGattService.CREATOR);
     }

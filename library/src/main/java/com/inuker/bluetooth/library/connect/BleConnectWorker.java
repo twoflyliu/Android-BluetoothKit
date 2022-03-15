@@ -38,6 +38,7 @@ import com.inuker.bluetooth.library.utils.proxy.ProxyInterceptor;
 import com.inuker.bluetooth.library.utils.proxy.ProxyUtils;
 
 import java.lang.reflect.Method;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -63,6 +64,8 @@ public class BleConnectWorker implements Handler.Callback, IBleConnectWorker, IB
     private BleGattProfile mBleGattProfile;
     private Map<UUID, Map<UUID, BluetoothGattCharacteristic>> mDeviceProfile;
 
+    private Map<UUID, List<BluetoothGattCharacteristic>> mDeviceProfile2; // Profile2, 特性可重复
+
     private IBluetoothGattResponse mBluetoothGattResponse;
 
     private RuntimeChecker mRuntimeChecker;
@@ -78,6 +81,7 @@ public class BleConnectWorker implements Handler.Callback, IBleConnectWorker, IB
         mRuntimeChecker = runtimeChecker;
         mWorkerHandler = new Handler(Looper.myLooper(), this);
         mDeviceProfile = new HashMap<UUID, Map<UUID, BluetoothGattCharacteristic>>();
+        mDeviceProfile2 = new HashMap<UUID, List<BluetoothGattCharacteristic>>();
         mBluetoothGattResponse = ProxyUtils.getProxy(this, IBluetoothGattResponse.class, this);
     }
 
@@ -87,11 +91,18 @@ public class BleConnectWorker implements Handler.Callback, IBleConnectWorker, IB
         List<BluetoothGattService> services = mBluetoothGatt.getServices();
 
         Map<UUID, Map<UUID, BluetoothGattCharacteristic>> newProfiles = new HashMap<UUID, Map<UUID, BluetoothGattCharacteristic>>();
+        Map<UUID, List<BluetoothGattCharacteristic>> newProfiles2 = new HashMap<>();
 
         for (BluetoothGattService service : services) {
             UUID serviceUUID = service.getUuid();
 
             Map<UUID, BluetoothGattCharacteristic> map = newProfiles.get(serviceUUID);
+            List<BluetoothGattCharacteristic> list = newProfiles2.get(serviceUUID);
+
+            if (list == null) {
+                list = new ArrayList<>();
+                newProfiles2.put(service.getUuid(), list);
+            }
 
             if (map == null) {
                 BluetoothLog.v("Service: " + serviceUUID);
@@ -106,12 +117,18 @@ public class BleConnectWorker implements Handler.Callback, IBleConnectWorker, IB
                 UUID characterUUID = character.getUuid();
                 BluetoothLog.v("character: uuid = " + characterUUID);
                 map.put(character.getUuid(), character);
+                list.add(character);
             }
         }
 
         mDeviceProfile.clear();
         mDeviceProfile.putAll(newProfiles);
-        mBleGattProfile = new BleGattProfile(mDeviceProfile);
+        //mBleGattProfile = new BleGattProfile(mDeviceProfile);
+
+        mDeviceProfile2.clear();
+        mDeviceProfile2.putAll(newProfiles2);
+
+        mBleGattProfile = new BleGattProfile(mDeviceProfile2, true); // 允许Character可重复
     }
 
     private BluetoothGattCharacteristic getCharacter(UUID service, UUID character) {
@@ -121,6 +138,211 @@ public class BleConnectWorker implements Handler.Callback, IBleConnectWorker, IB
             Map<UUID, BluetoothGattCharacteristic> characters = mDeviceProfile.get(service);
             if (characters != null) {
                 characteristic = characters.get(character);
+            }
+        }
+
+        if (characteristic == null) {
+            if (mBluetoothGatt != null) {
+                BluetoothGattService gattService = mBluetoothGatt.getService(service);
+                if (gattService != null) {
+                    characteristic = gattService.getCharacteristic(character);
+                }
+            }
+        }
+
+        return characteristic;
+    }
+
+    private BluetoothGattCharacteristic getReadableCharacter(UUID service, UUID character) {
+        BluetoothGattCharacteristic characteristic = null;
+
+        if (service != null && character != null) {
+            Map<UUID, BluetoothGattCharacteristic> characters = mDeviceProfile.get(service);
+            if (characters != null) {
+                characteristic = characters.get(character);
+
+                // 修复带有重复UUID特性，只读特性
+                if (characteristic != null && (!isCharacteristicReadable(characteristic))) {
+                    try {
+                        List<BluetoothGattCharacteristic> characteristicList = mDeviceProfile2.get(service);
+                        if (characteristicList != null) {
+                            for (BluetoothGattCharacteristic characteristic1 : characteristicList) {
+                                if (character.equals(characteristic1.getUuid())
+                                        && isCharacteristicReadable(characteristic1)) {
+                                    characteristic = characteristic1;
+                                    break;
+                                }
+                            }
+                        }
+                    } catch (Exception e) {
+                        characteristic = null;
+                    }
+
+                }
+            }
+        }
+
+        if (characteristic == null) {
+            if (mBluetoothGatt != null) {
+                BluetoothGattService gattService = mBluetoothGatt.getService(service);
+                if (gattService != null) {
+                    characteristic = gattService.getCharacteristic(character);
+                }
+            }
+        }
+
+        return characteristic;
+    }
+
+    private BluetoothGattCharacteristic getWritableCharacter(UUID service, UUID character) {
+        BluetoothGattCharacteristic characteristic = null;
+
+        if (service != null && character != null) {
+            Map<UUID, BluetoothGattCharacteristic> characters = mDeviceProfile.get(service);
+            if (characters != null) {
+                characteristic = characters.get(character);
+
+                // 修复带有重复UUID特性，只读特性
+                if (characteristic != null && (!isCharacteristicWritable(characteristic))) {
+                    try {
+                        List<BluetoothGattCharacteristic> characteristicList = mDeviceProfile2.get(service);
+                        if (characteristicList != null) {
+                            for (BluetoothGattCharacteristic characteristic1 : characteristicList) {
+                                if (character.equals(characteristic1.getUuid())
+                                        && isCharacteristicWritable(characteristic1)) {
+                                    characteristic = characteristic1;
+                                    break;
+                                }
+                            }
+                        }
+                    } catch (Exception e) {
+                        characteristic = null;
+                    }
+
+                }
+            }
+        }
+
+        if (characteristic == null) {
+            if (mBluetoothGatt != null) {
+                BluetoothGattService gattService = mBluetoothGatt.getService(service);
+                if (gattService != null) {
+                    characteristic = gattService.getCharacteristic(character);
+                }
+            }
+        }
+
+        return characteristic;
+    }
+
+    private BluetoothGattCharacteristic getNoRspWritableCharacter(UUID service, UUID character) {
+        BluetoothGattCharacteristic characteristic = null;
+
+        if (service != null && character != null) {
+            Map<UUID, BluetoothGattCharacteristic> characters = mDeviceProfile.get(service);
+            if (characters != null) {
+                characteristic = characters.get(character);
+
+                // 修复带有重复UUID特性，只读特性
+                if (characteristic != null && (!isCharacteristicNoRspWritable(characteristic))) {
+                    try {
+                        List<BluetoothGattCharacteristic> characteristicList = mDeviceProfile2.get(service);
+                        if (characteristicList != null) {
+                            for (BluetoothGattCharacteristic characteristic1 : characteristicList) {
+                                if (character.equals(characteristic1.getUuid())
+                                        && isCharacteristicNoRspWritable(characteristic1)) {
+                                    characteristic = characteristic1;
+                                    break;
+                                }
+                            }
+                        }
+                    } catch (Exception e) {
+                        characteristic = null;
+                    }
+
+                }
+            }
+        }
+
+        if (characteristic == null) {
+            if (mBluetoothGatt != null) {
+                BluetoothGattService gattService = mBluetoothGatt.getService(service);
+                if (gattService != null) {
+                    characteristic = gattService.getCharacteristic(character);
+                }
+            }
+        }
+
+        return characteristic;
+    }
+
+    private BluetoothGattCharacteristic getNotifyableCharacter(UUID service, UUID character) {
+        BluetoothGattCharacteristic characteristic = null;
+
+        if (service != null && character != null) {
+            Map<UUID, BluetoothGattCharacteristic> characters = mDeviceProfile.get(service);
+            if (characters != null) {
+                characteristic = characters.get(character);
+
+                // 修复带有重复UUID特性，只读特性
+                if (characteristic != null && (!isCharacteristicNotifyable(characteristic))) {
+                    try {
+                        List<BluetoothGattCharacteristic> characteristicList = mDeviceProfile2.get(service);
+                        if (characteristicList != null) {
+                            for (BluetoothGattCharacteristic characteristic1 : characteristicList) {
+                                if (character.equals(characteristic1.getUuid())
+                                        && isCharacteristicNotifyable(characteristic1)) {
+                                    characteristic = characteristic1;
+                                    break;
+                                }
+                            }
+                        }
+                    } catch (Exception e) {
+                        characteristic = null;
+                    }
+
+                }
+            }
+        }
+
+        if (characteristic == null) {
+            if (mBluetoothGatt != null) {
+                BluetoothGattService gattService = mBluetoothGatt.getService(service);
+                if (gattService != null) {
+                    characteristic = gattService.getCharacteristic(character);
+                }
+            }
+        }
+
+        return characteristic;
+    }
+
+    private BluetoothGattCharacteristic getIndicatableCharacter(UUID service, UUID character) {
+        BluetoothGattCharacteristic characteristic = null;
+
+        if (service != null && character != null) {
+            Map<UUID, BluetoothGattCharacteristic> characters = mDeviceProfile.get(service);
+            if (characters != null) {
+                characteristic = characters.get(character);
+
+                // 修复带有重复UUID特性，只读特性
+                if (characteristic != null && (!isCharacteristicIndicatable(characteristic))) {
+                    try {
+                        List<BluetoothGattCharacteristic> characteristicList = mDeviceProfile2.get(service);
+                        if (characteristicList != null) {
+                            for (BluetoothGattCharacteristic characteristic1 : characteristicList) {
+                                if (character.equals(characteristic1.getUuid())
+                                        && isCharacteristicIndicatable(characteristic1)) {
+                                    characteristic = characteristic1;
+                                    break;
+                                }
+                            }
+                        }
+                    } catch (Exception e) {
+                        characteristic = null;
+                    }
+
+                }
             }
         }
 
@@ -416,7 +638,8 @@ public class BleConnectWorker implements Handler.Callback, IBleConnectWorker, IB
 
         checkRuntime();
 
-        BluetoothGattCharacteristic characteristic = getCharacter(service, character);
+        //BluetoothGattCharacteristic characteristic = getCharacter(service, character);
+        BluetoothGattCharacteristic characteristic = getReadableCharacter(service, character);
 
         if (characteristic == null) {
             BluetoothLog.e(String.format("characteristic not exist!"));
@@ -448,7 +671,8 @@ public class BleConnectWorker implements Handler.Callback, IBleConnectWorker, IB
 
         checkRuntime();
 
-        BluetoothGattCharacteristic characteristic = getCharacter(service, character);
+        //BluetoothGattCharacteristic characteristic = getCharacter(service, character);
+        BluetoothGattCharacteristic characteristic = getWritableCharacter(service, character);
 
         if (characteristic == null) {
             BluetoothLog.e(String.format("characteristic not exist!"));
@@ -550,7 +774,8 @@ public class BleConnectWorker implements Handler.Callback, IBleConnectWorker, IB
 
         checkRuntime();
 
-        BluetoothGattCharacteristic characteristic = getCharacter(service, character);
+        //BluetoothGattCharacteristic characteristic = getCharacter(service, character);
+        BluetoothGattCharacteristic characteristic = getNoRspWritableCharacter(service, character);
 
         if (characteristic == null) {
             BluetoothLog.e(String.format("characteristic not exist!"));
@@ -585,7 +810,8 @@ public class BleConnectWorker implements Handler.Callback, IBleConnectWorker, IB
         BluetoothLog.v(String.format("setCharacteristicNotification for %s, service = %s, character = %s, enable = %b",
                 getAddress(), service, character, enable));
 
-        BluetoothGattCharacteristic characteristic = getCharacter(service, character);
+        //BluetoothGattCharacteristic characteristic = getCharacter(service, character);
+        BluetoothGattCharacteristic characteristic = getNotifyableCharacter(service, character);
 
         if (characteristic == null) {
             BluetoothLog.e(String.format("characteristic not exist!"));
@@ -636,7 +862,8 @@ public class BleConnectWorker implements Handler.Callback, IBleConnectWorker, IB
         BluetoothLog.v(String.format("setCharacteristicIndication for %s, service = %s, character = %s, enable = %b",
                 getAddress(), service, character, enable));
 
-        BluetoothGattCharacteristic characteristic = getCharacter(service, character);
+        //BluetoothGattCharacteristic characteristic = getCharacter(service, character);
+        BluetoothGattCharacteristic characteristic = getIndicatableCharacter(service, character);
 
         if (characteristic == null) {
             BluetoothLog.e(String.format("characteristic not exist!"));
